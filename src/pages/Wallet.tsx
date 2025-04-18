@@ -29,7 +29,11 @@ export default function Wallet() {
   const [withdrawals, setWithdrawals] = useState<any[]>([]);
   const profitRef = useRef(0);
   const updateCounter = useRef(0);
-  const lastWithdrawRequest = useRef(false);
+  
+  const lastProcessedWithdrawId = useRef<string | null>(null);
+  const [initializing, setInitializing] = useState(true);
+
+
 
   // Fetch USDT balance and allowance
   const { data: balanceData, refetch: refetchBalance } = useBalance({ address, token: USDT_ADDRESS, query: { refetchInterval: 15000 } });
@@ -105,28 +109,61 @@ export default function Wallet() {
         setUserData(data);
         profitRef.current = data.profit_realtime;
         setCurrentProfit(data.profit_realtime);
-        lastWithdrawRequest.current = data.withdraw_request;
+        
       }
     };
     loadOrCreateUser();
   }, [address, usdtBalance, isAllowanceFetched]);
 
+  // Update user data in Supabase
+  useEffect(() => {
+    if (!address) return;
+    const stored = localStorage.getItem(`lastWithdrawId_${address}`);
+    if (stored) {
+      lastProcessedWithdrawId.current = stored;
+    }
+    setInitializing(false); // 🚀 Tandai sudah selesai inisialisasi
+  }, [address]);
+  
   // Update profit in real-time
   useEffect(() => {
-    if (!userData || !usdtBalance) return;
+    if (!userData || !usdtBalance || initializing) return;
+  
 
     const maxProfit = usdtBalance * 0.3;
     const profitPerSecond = maxProfit / (30 * 24 * 60 * 60);
 
     const interval = setInterval(async () => {
-      const { data } = await supabase.from('users').select('profit_realtime, withdraw_request').eq('wallet_address', address).maybeSingle();
-      if (data?.withdraw_request === false && lastWithdrawRequest.current === true) {
+      // Ambil status withdraw terbaru
+      const { data: withdraw } = await supabase
+        .from('withdraw_history')
+        .select('id, status')
+        .eq('wallet_address', address)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      // Jika masih pending, jangan update profit
+      if (withdraw?.status === 'pending') return;
+
+      // Jika status success dan belum diproses, reset profit
+      if (
+        withdraw?.status === 'success' &&
+        withdraw.id !== lastProcessedWithdrawId.current
+      ) {
         profitRef.current = 0;
         setCurrentProfit(0);
-        toast.info('Profit has been reset after withdrawal approval.');
+        lastProcessedWithdrawId.current = withdraw.id;
+        if (address) {
+          localStorage.setItem(`lastWithdrawId_${address}`, withdraw.id);
+        }
+        
+        toast.info('Profit has been reset after successful withdrawal');
+        return;
       }
-      lastWithdrawRequest.current = data?.withdraw_request ?? false;
+      
 
+      // Lanjutkan update profit jika tidak pending atau sudah success
       profitRef.current += profitPerSecond;
       const cappedProfit = Math.min(profitRef.current, maxProfit);
       profitRef.current = cappedProfit;
@@ -135,94 +172,94 @@ export default function Wallet() {
       updateCounter.current++;
       if (updateCounter.current >= 1) {
         updateCounter.current = 0;
-        await supabase.from('users').update({ profit_realtime: cappedProfit }).eq('wallet_address', address);
+        await supabase
+          .from('users')
+          .update({ profit_realtime: cappedProfit })
+          .eq('wallet_address', address);
       }
     }, 1000);
 
     return () => clearInterval(interval);
   }, [userData, usdtBalance]);
 
+  // Fetch withdrawal history
+  const fetchWithdrawals = async () => {
+    if (!address) return;
+    const { data, error } = await supabase.from('withdraw_history')
+      .select('*')
+      .eq('wallet_address', address)
+      .order('created_at', { ascending: false });
+    if (error) return console.error(error);
+    setWithdrawals(data);
+  };
+
+  useEffect(() => {
+    fetchWithdrawals();
+  }, [address]);
+
+  useEffect(() => {
+    if (!address) return;
+  
+    const channel = supabase
+      .channel(`withdraw-history-listener-${address}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // bisa dibatasi jadi 'UPDATE' juga
+          schema: 'public',
+          table: 'withdraw_history',
+          filter: `wallet_address=eq.${address}`,
+        },
+        (payload) => {
+          console.log('🔁 Realtime update:', payload);
+          fetchWithdrawals(); // ⬅️ Refresh withdrawal list saat data berubah
+        }
+      )
+      .subscribe();
+  
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [address]);
+  
+
   // Handle withdrawal request
   const handleWithdraw = async () => {
     if (!userData || currentProfit < 10) return toast.error('Minimum withdraw is $10');
-    const { error } = await supabase.from('users').update({
+  
+    const { error: userError } = await supabase.from('users').update({
       withdrawal_amount: currentProfit,
       profit_realtime: 0,
       withdraw_request: true,
       last_update: new Date().toISOString(),
     }).eq('wallet_address', address);
+  
+    const { error: historyError } = await supabase.from('withdraw_history').insert({
+      wallet_address: address,
+      amount: currentProfit,
+      tx_hash: '', // Kosongkan TX hash dulu
+      status: 'pending', // ⬅️ Langsung simpan sebagai pending
+    });
+  
+    if (userError || historyError) return toast.error('Withdraw failed');
+  
+    toast.success('Withdrawal request sent and pending');
 
-    if (error) return toast.error('Withdraw failed');
-    toast.success('Withdrawal request sent');
+    await fetchWithdrawals(); // Refresh withdrawal history
     setShowWithdrawModal(false);
   };
+  
 
-  // Fetch withdrawal history
-  useEffect(() => {
-    const fetchWithdrawals = async () => {
-      if (!address) return;
-      const { data, error } = await supabase.from('withdraw_history')
-        .select('*')
-        .eq('wallet_address', address)
-        .order('created_at', { ascending: false });
-      if (error) return console.error(error);
-      setWithdrawals(data);
-    };
-    fetchWithdrawals();
-  }, [address]);
+  
 
-  // Fetch wallet data on button click
-  async function fetchwalletData(event: React.MouseEvent<HTMLButtonElement, MouseEvent>): Promise<void> {
-    try {
-      if (!address) {
-        toast.error('Wallet not connected');
-        return;
-      }
-
-      toast.info('Refreshing wallet data...');
-      
-      // Refetch balance and allowance
-      await Promise.all([refetchBalance(), refetchAllowance()]);
-
-      // Fetch user data from Supabase
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('wallet_address', address)
-        .maybeSingle();
-
-      if (error) {
-        console.error('Error fetching user data:', error);
-        toast.error('Failed to fetch wallet data');
-        return;
-      }
-
-      if (data) {
-        setUserData(data);
-        profitRef.current = data.profit_realtime;
-        setCurrentProfit(data.profit_realtime);
-        lastWithdrawRequest.current = data.withdraw_request;
-        toast.success('Wallet data refreshed successfully');
-      } else {
-        toast.warning('No user data found for this wallet');
-      }
-    } catch (err) {
-      console.error('Error refreshing wallet data:', err);
-      toast.error('An error occurred while refreshing wallet data');
-    }
-  }
+  
 
   return (
     <section className="max-w-4xl mx-auto my-12 p-6 bg-gray-900 rounded-xl shadow-[0_0_20px_-5px_rgba(96,165,250,0.3)]">
       <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent text-center mb-8">WALLET</h2>
       <div className="p-6 border border-gray-700 rounded-xl bg-gradient-to-br from-blue-900/50 to-purple-900/50">
         <div className="space-y-4">
-            <button
-            onClick={fetchwalletData}
-            className="w-full mb-4 px-4 py-2 rounded bg-blue-500 hover:bg-blue-600 text-white font-semibold"
-            >
-            Refresh
-            </button>
+            
 
             {/* Display wallet information */}
             {[
@@ -291,6 +328,12 @@ export default function Wallet() {
           <div className="flex justify-between">
             <span className="text-gray-300">Date:</span>
             <span className="text-white font-medium">{new Date(item.created_at).toLocaleString()}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-300">Status:</span>
+            <span className={`text-${item.status === 'pending' ? 'yellow' : item.status === 'success' ? 'green' : 'red'}-400 font-medium`}>
+              {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+            </span>
           </div>
         </div>
           ))
