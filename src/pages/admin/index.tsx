@@ -24,6 +24,7 @@ type WithdrawHistory = {
   amount: number;
   tx_hash: string;
   created_at: string;
+  status: string; // Added status property
 };
 
 
@@ -194,6 +195,28 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
     }
   };
 
+  useEffect(() => {
+    const channel = supabase
+      .channel('admin-users-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'users',
+        },
+        () => {
+          fetchUsers(); // 🔁 Refresh user list saat ada perubahan
+        }
+      )
+      .subscribe();
+  
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+  
+
 
   // --- Fungsi update status untuk withdraw request (approve/reject) ---
   const handleRejectWithdraw = async (wallet_address: string) => {
@@ -209,7 +232,7 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
     }
   };
   
-  // Fungsi untuk menyetujui withdraw request dan menyimpan tx hash
+  // Fungsi untuk menyetujui withdraw request dan menyimpan tx hash dengan status success
   const handleApproveWithTxHash = async () => {
     if (!selectedWallet || !txHash) return;
   
@@ -219,29 +242,47 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
         withdraw_request: false,
       };
   
+      // Update tabel user
       const { error: userUpdateError } = await supabase
         .from('users')
         .update(updates)
         .eq('wallet_address', selectedWallet);
   
-      const { error: historyError } = await supabase
+      // Temukan entry withdraw yang pending
+      const { data: pendingEntry, error: findError } = await supabase
         .from('withdraw_history')
-        .insert({
-          wallet_address: selectedWallet,
+        .select('id')
+        .eq('wallet_address', selectedWallet)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+  
+      if (findError || !pendingEntry) throw findError || new Error('No pending withdrawal found');
+  
+      // Update ke success dan simpan tx hash
+      const { error: updateError } = await supabase
+        .from('withdraw_history')
+        .update({
           tx_hash: txHash,
-          amount: users.find((u) => u.wallet_address === selectedWallet)?.withdrawal_amount || 0,
-        });
+          status: 'success',
+        })
+        .eq('id', pendingEntry.id);
   
-      if (userUpdateError || historyError) throw userUpdateError || historyError;
+      if (userUpdateError || updateError) throw userUpdateError || updateError;
   
+      // Reset state dan refresh data
       setTxHash('');
       setShowTxModal(false);
       setSelectedWallet(null);
       fetchUsers();
+      fetchWithdrawHistory();
     } catch (err) {
       console.error('Failed to approve withdrawal:', err);
     }
   };
+  
+
 
   // Fungsi untuk mengambil riwayat withdraw dari database
   const fetchWithdrawHistory = async () => {
@@ -263,6 +304,28 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
       setLoadingHistory(false);
     }
   };
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('admin-withdraw-history-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'withdraw_history',
+        },
+        () => {
+          fetchWithdrawHistory(); // 🔁 Refresh withdraw history saat ada update
+        }
+      )
+      .subscribe();
+  
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+  
   
   
   
@@ -559,7 +622,8 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
         </div>
       )}
 
-        {/* Withdraw Request History Table (use withdraw_history) */}
+        
+        {/* Withdraw History Table */}
         <div className="mb-10">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-2xl font-bold text-white">Withdraw Request History</h2>
@@ -583,6 +647,7 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
                     <th className="px-6 py-4 text-left text-white font-semibold">Amount ($)</th>
                     <th className="px-6 py-4 text-left text-white font-semibold">TX Hash</th>
                     <th className="px-6 py-4 text-left text-white font-semibold">Date</th>
+                    <th className="px-6 py-4 text-left text-white font-semibold">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-700">
@@ -594,6 +659,8 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
                       <td className="px-6 py-4 text-gray-400">
                         {new Date(record.created_at).toLocaleString()}
                       </td>
+                      <td className="px-6 py-4 text-green-400">{record.status}</td>
+
                     </tr>
                   ))}
                 </tbody>
