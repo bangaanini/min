@@ -201,12 +201,13 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
       .on(
         'postgres_changes',
         {
-          event: '*',
+          event: 'UPDATE',
           schema: 'public',
           table: 'users',
+          filter: 'withdraw_request=eq.true' // 🛑 hanya saat user minta withdraw
         },
         () => {
-          fetchUsers(); // 🔁 Refresh user list saat ada perubahan
+          fetchUsers(); // 🔁 hanya jika withdraw_request = true
         }
       )
       .subscribe();
