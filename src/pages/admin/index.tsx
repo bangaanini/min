@@ -3,7 +3,7 @@ import { supabase } from '../../../lib/supabase';
 import { useAccount } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { transferFromUser, getContractBalance, withdraw } from '../../utils/CloudMining';
-import { useAdminAuth } from './useAdminAuth';
+import { useAdminAuth } from '../../hooks/useAdminAuth';
 
 type User = {
   id: string;
