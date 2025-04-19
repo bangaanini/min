@@ -1,4 +1,3 @@
-// wallet.tsx (updated with persistent profit state)
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useReadContract, useWriteContract, useBalance, usePublicClient } from 'wagmi';
