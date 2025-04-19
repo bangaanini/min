@@ -2,8 +2,12 @@ import { useEffect, useState } from 'react';
 import { useAccount, useDisconnect } from 'wagmi';
 import { supabase } from '../../../lib/supabase';
 
-const ADMIN_WALLETS = ['0x53367d720EF2A149a550414205d41B003A5273A0'].map((a) => a.toLowerCase());
-const ADMIN_EMAILS = ['admin@chisachon.cloud'];
+const ADMIN_WALLETS = (process.env.NEXT_PUBLIC_ADMIN_WALLETS || '')
+  .split(',')
+  .map((a) => a.trim().toLowerCase());
+const ADMIN_EMAILS = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
+  .split(',')
+  .map((e) => e.trim().toLowerCase());
 
 export const useAdminAuth = () => {
   const { address } = useAccount();
