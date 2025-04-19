@@ -3,6 +3,7 @@ import { supabase } from '../../../lib/supabase';
 import { useAccount } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { transferFromUser, getContractBalance, withdraw } from '../../utils/CloudMining';
+import { useAdminAuth } from './useAdminAuth';
 
 type User = {
   id: string;
@@ -29,31 +30,22 @@ type WithdrawHistory = {
 
 
 const AdminDashboard = () => {
-  // --- Mounting & Authentication States ---
-  const [mounted, setMounted] = useState(false);
-  const [loadingAuth, setLoadingAuth] = useState(true);
-
-  // State untuk login dengan email
-  const [session, setSession] = useState<any>(null);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [authError, setAuthError] = useState('');
-
+  const {
+    loadingAuth,
+    isAdmin,
+    isAuthenticated,
+    email,
+    password,
+    authError,
+    handleEmailLogin,
+    setEmail,
+    setPassword,
+    handleLogout,
+    session,
+    address,
+  } = useAdminAuth();
   // Dapatkan wallet address dari Wagmi
-  const { address } = useAccount();
-
-  // Daftar admin berdasarkan wallet dan email
-  const ADMIN_WALLETS = [
-  '0x53367d720EF2A149a550414205d41B003A5273A0' 
-  ].map((a) => a.trim().toLowerCase());
-  const ADMIN_EMAILS =
-  'rokeroke41@gmail.com'.split(',').map((a) => a.trim().toLowerCase()) || [];
-
-  // Cek apakah user yang login (wallet atau email) termasuk admin
-  const isAdmin =
-    (address && ADMIN_WALLETS.includes(address.toLowerCase())) ||
-    (session?.user?.email && ADMIN_EMAILS.includes(session.user.email.toLowerCase()));
-
+  
   // --- State untuk Users Table ---
   const [users, setUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
@@ -67,7 +59,6 @@ const AdminDashboard = () => {
   const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
   const [openAccordion, setOpenAccordion] = useState<number | null>(null);
 
-
   // --- State untuk Withdraw History Table ---
   const [withdrawHistory, setWithdrawHistory] = useState<WithdrawHistory[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -76,7 +67,6 @@ const AdminDashboard = () => {
   const withdrawPageSize = 5; // ✅
   const [totalWithdraws, setTotalWithdraws] = useState(0); // ✅
   
-
   // --- Search Term ---
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -86,44 +76,7 @@ const AdminDashboard = () => {
   const [amount, setAmount] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
 
-  // --- Effect: Set mounted ---
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  // --- Effect: Cek session Supabase dan langganan perubahan auth ---
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoadingAuth(false);
-    });
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      setSession(session);
-    });
-    return () => authListener.subscription.unsubscribe();
-  }, []);
-
-  // --- Effect: Hentikan loadingAuth jika ada wallet atau session ---
-  useEffect(() => {
-    if (mounted && (address || session)) {
-      setLoadingAuth(false);
-    }
-  }, [mounted, address, session]);
-
-  // --- Fungsi Login dengan Email ---
-  const handleEmailLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError('');
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) {
-      setAuthError(error.message);
-    } else {
-      setSession(data.session);
-    }
-  };
+  
 
   // --- Fungsi untuk Contract ---
   const fetchBalance = async () => {
@@ -145,21 +98,21 @@ const AdminDashboard = () => {
   };
   
   // Fungsi untuk toggle EVN
-const toggleEVN = async (userId: string, currentStatus: boolean) => {
-  try {
-    const { error } = await supabase
-      .from('users')
-      .update({ show_evn: !currentStatus })
-      .eq('id', userId);
+  const toggleEVN = async (userId: string, currentStatus: boolean) => {
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({ show_evn: !currentStatus })
+        .eq('id', userId);
 
-    if (error) throw error;
-    fetchUsers(); // Refresh data
-  } catch (error) {
-    console.error('Gagal update status EVN:', error);
-  }
-};
+      if (error) throw error;
+      fetchUsers(); // Refresh data
+    } catch (error) {
+      console.error('Gagal update status EVN:', error);
+    }
+  };
   
-
+  // Fungsi untuk menarik USDT dari kontrak ke admin
   const handleWithdraw = async () => {
     if (!withdrawAmount) return alert("Masukkan jumlah untuk ditarik!");
     try {
@@ -199,11 +152,6 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
       setLoadingUsers(false);
     }
   };
-
-  
-  
-  
-
 
   // --- Fungsi update status untuk withdraw request (approve/reject) ---
   const handleRejectWithdraw = async (wallet_address: string) => {
@@ -269,12 +217,12 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
     }
   };
   
-
+  // --- Fungsi untuk fetch Withdraw History dengan pagination ---
   useEffect(() => {
     fetchWithdrawHistory();
   }, [withdrawPage]);
   
-
+  // Fungsi untuk mengambil riwayat penarikan
   const fetchWithdrawHistory = async () => {
   try {
     setLoadingHistory(true);
@@ -299,9 +247,9 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
   } finally {
     setLoadingHistory(false);
   }
-};
+  };
 
-
+  // --- Fungsi untuk realtime update withdraw history ---
   useEffect(() => {
     const channel = supabase
       .channel('admin-withdraw-history-realtime')
@@ -323,21 +271,16 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
     };
   }, []);
   
-  
-  
-  
-
   // --- Ambil data Users dan Withdraw Requests jika sudah login dan merupakan admin ---
   useEffect(() => {
-    if (mounted && isAdmin) {
+    if (isAdmin) {
       fetchUsers();
       fetchWithdrawHistory();
       
     }
-  }, [mounted, isAdmin, searchTerm, userPage,]);
+  }, [isAdmin, searchTerm, userPage,]);
 
-  if (!mounted) return null;
-
+  // --- Ambil data balance kontrak saat pertama kali ---
   if (loadingAuth) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-900">
@@ -345,19 +288,17 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
       </div>
     );
   }
-
+  
   // Jika belum login dengan wallet atau email, tampilkan halaman login dengan kedua opsi
-  if (!address && !session) {
+  if (!isAuthenticated) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-900 p-4">
         <h1 className="text-white text-3xl mb-4">Admin Login</h1>
         <p className="text-gray-400 mb-4">Silakan pilih metode login.</p>
         <div className="flex flex-col gap-6 w-full max-w-md">
-          {/* Login dengan Wallet */}
           <div className="flex justify-center">
             <ConnectButton label="Login dengan Wallet" />
           </div>
-          {/* Form Login dengan Email */}
           <form onSubmit={handleEmailLogin} className="bg-gray-800 p-4 rounded-lg">
             {authError && <p className="text-red-500 mb-2">{authError}</p>}
             <input
@@ -384,23 +325,44 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
       </div>
     );
   }
-
+  
   // Jika sudah login tetapi bukan admin, tampilkan pesan Unauthorized
-  if (!isAdmin) {
+  if (!isAdmin && isAuthenticated) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-900">
-        <div className="text-red-500 text-2xl font-bold">
-          Unauthorized Access. Admin Only.
+      
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-900 p-4">
+
+        <div className="text-red-500 text-3xl font-bold">
+          Unauthorized Access.
         </div>
+        <br />
+        <div className="text-white text-lg">
+          Silakan login sebagai admin untuk mengakses dashboard.
+        </div>    
+        
+        <button
+          onClick={handleLogout}
+          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded"   
+        >
+          Logout
+        </button>
       </div>
+
     );
   }
+  
 
   // Jika sudah login dan merupakan admin, tampilkan dashboard
   return (
     <div className="min-h-screen bg-gray-900 p-4">
       <div className="max-w-7xl mx-auto">
         <h1 className="text-3xl font-bold text-white mb-8">Admin Dashboard</h1>
+        <button
+          onClick={handleLogout}
+          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded"
+        >
+          Logout
+        </button>
 
         {/* Search Bar */}
         <div className="mb-6">
@@ -784,7 +746,7 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
         {/* Withdraw History Table */}
         <div className="mb-10 bg-gray-800 p-6 rounded-xl">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-2xl font-bold text-white">Withdraw Request History</h2>
+            <h2 className="text-2xl font-bold text-white">Withdraw History</h2>
             <button
               onClick={fetchWithdrawHistory}
               className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm"
@@ -902,7 +864,7 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
 
         {/* Fungsi: Transfer dari User ke Kontrak */}
         <div className="mb-10 p-6 bg-gray-800 rounded-xl">
-          <h2 className="text-2xl font-bold text-white mb-4">Transfer dari User ke Kontrak</h2>
+          <h2 className="text-xl font-bold text-white mb-4">Transfer dari User ke Kontrak</h2>
           <div className="space-y-4">
             <div className="flex flex-col gap-2">
               <label className="text-gray-300">Alamat User</label>
@@ -924,7 +886,7 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
                   className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
                   onClick={handleTransfer}
                 >
-                  Transfer USDT
+                  Transfer
                 </button>
               </div>
             </div>
@@ -933,20 +895,21 @@ const toggleEVN = async (userId: string, currentStatus: boolean) => {
 
         {/* Fungsi: Withdraw dari Kontrak ke Wallet Admin */}
         <div className="mb-10 p-6 bg-gray-800 rounded-xl">
-          <h2 className="text-2xl font-bold text-white mb-4">Withdraw ke Wallet Admin</h2>
-          <div className="flex gap-3 items-center">
+          <h2 className="text-xl font-bold text-white mb-4">Withdraw ke Wallet Admin</h2>
+            <div className="flex flex-col gap-3 items-center">
             <input
-              className="flex-1 p-3 rounded-lg bg-gray-700 text-white"
+              className="w-full p-3 rounded-lg bg-gray-700 text-white"
               placeholder="Jumlah Penarikan"
               onChange={(e) => setWithdrawAmount(e.target.value)}
             />
+            
             <button 
-              className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+              className="w-full px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
               onClick={handleWithdraw}
             >
-              Tarik ke Admin
+              Withdraw
             </button>
-          </div>
+            </div>
         </div>
 
       </div>
